@@ -61,6 +61,6 @@ class ossSLatch {
 	bool try_get_shared () {
 		return ( pthread_rwlock_tryrdlock ( &_lock ) == 0 ) ;
 	}
-}
+} ;
 
 #endif

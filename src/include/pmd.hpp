@@ -6,6 +6,7 @@
 #define _PMD_HPP__
 
 #include "core.hpp"
+#include "pmdEDUMgr.hpp"
 
 enum GHDB_DB_STATUS {
    GHDB_DB_NORMAL = 0,
@@ -24,11 +25,12 @@ class pmdOptions ;
 class GHDB_KRCB {
    private :
 	 // configured options
-	char          _dataFilePath [ OSS_MAX_PATHSIZE + 1 ] ;
-	char          _logFilePath  [ OSS_MAX_PATHSIZE + 1 ] ;
-	int           _maxPool ;
-	char          _svcName [ NI_MAXSERV + 1 ] ;
-	GHDB_DB_STATUS _dbStatus ;
+	char           	_dataFilePath [ OSS_MAX_PATHSIZE + 1 ] ;
+	char          	_logFilePath  [ OSS_MAX_PATHSIZE + 1 ] ;
+	int           	_maxPool ;
+	char           	_svcName [ NI_MAXSERV + 1 ] ;
+	GHDB_DB_STATUS 	_dbStatus ;
+	pmdEDUMgr	_eduMgr ;
    public :
    	// constructor
    	GHDB_KRCB () {
@@ -42,6 +44,10 @@ class GHDB_KRCB {
    	~GHDB_KRCB () {}
 
    	// inline function
+	// get edu mgr
+	pmdEDUMgr *getEDUMgr () {
+		return & _eduMgr ;
+	}
    	// get database status
    	inline GHDB_DB_STATUS getDBStatus () {
       		return _dbStatus ;

@@ -5,11 +5,17 @@
 #include "core.hpp"
 #include "command.hpp"
 #include "commandFactory.hpp"
+#include "pd.hpp"
+#include "msg.hpp"
 
 COMMAND_BEGIN
-COMMAND_ADD(COMMAND_CONNECT, ConnectCommand)
+COMMAND_ADD(COMMAND_INSERT,InsertCommand)
+COMMAND_ADD(COMMAND_QUERY,QueryCommand)
+COMMAND_ADD(COMMAND_DELETE, DeleteCommand)
+COMMAND_ADD(COMMAND_CONNECT,ConnectCommand)
 COMMAND_ADD(COMMAND_QUIT, QuitCommand)
 COMMAND_ADD(COMMAND_HELP, HelpCommand)
+COMMAND_ADD(COMMAND_SNAPSHOT, SnapshotCommand)
 COMMAND_END
 
 extern int gQuit ;
@@ -150,15 +156,113 @@ int ICommand::sendOrder ( ossSocket &sock, int opCode ) {
 	int ret = GHDB_OK ;
 	memset ( _sendBuf, 0, SEND_BUF_SIZE ) ;
 	char * pSendBuf = _sendBuf ;
-	const char *pStr = "hello world" ;
-	*(int*)pSendBuf = strlen( pStr ) + 1 + sizeof(int) ;
-	memcpy ( &pSendBuf[4], pStr, strlen(pStr) + 1 ) ;
-	/* 	MsgHeader * header = (MsgHeader*)pSendBuf ;
+	MsgHeader * header = (MsgHeader*)pSendBuf ;
 		header->messageLen = sizeof(MsgHeader) ;
-		header->opCode = opCode;	
-	*/
+		header->opCode = opCode;
 	ret = sock.send( pSendBuf, *(int*)pSendBuf ) ;
 	return ret ;
+}
+
+/******************************InsertCommand********************************************/
+int InsertCommand::handleReply() {
+   	MsgReply * msg = (MsgReply*)_recvBuf;
+   	int returnCode = msg->returnCode;
+   	int ret = getError(returnCode);
+   	return ret;
+   	return GHDB_OK ;
+}
+
+int InsertCommand::execute( ossSocket & sock, std::vector<std::string> & argVec )
+{
+   	int rc = GHDB_OK;
+   	if( argVec.size() <1 ) {
+      		return getError(GHDB_INSERT_INVALID_ARGUMENT);
+   	}
+   	_jsonString = argVec[0];
+     	if( !sock.isConnected() ) {
+      		return getError(GHDB_SOCK_NOT_CONNECT);
+   	}
+
+   	rc = sendOrder( sock, msgBuildInsert );
+   	//PD_RC_CHECK ( rc, PDERROR, "Failed to send order, rc = %d", rc ) ;
+
+   	rc = recvReply( sock );
+   	//PD_RC_CHECK ( rc, PDERROR, "Failed to receive reply, rc = %d", rc ) ;
+   	rc = handleReply();
+   	//PD_RC_CHECK ( rc, PDERROR, "Failed to receive reply, rc = %d", rc ) ;
+
+	done :
+   		return rc;
+	error :
+   		goto done ;
+}
+
+/******************************QueryCommand**********************************************/
+int QueryCommand::handleReply() {
+   	MsgReply * msg = (MsgReply*)_recvBuf;
+   	int returnCode = msg->returnCode;
+   	int ret = getError(returnCode);
+   	if(ret) {
+      		return ret;
+   	}
+   	if ( msg->numReturn ) {
+      		bson::BSONObj bsonData = bson::BSONObj( &(msg->data[0]) );
+      		std::cout << bsonData.toString() << std::endl;
+   	}
+   	return ret;
+}
+
+int QueryCommand::execute( ossSocket & sock, std::vector<std::string> & argVec ) {
+   	int rc = GHDB_OK;
+   	if( argVec.size() <1 ) {
+      		return getError(GHDB_QUERY_INVALID_ARGUMENT);
+   	}
+   	_jsonString = argVec[0];
+   	if( !sock.isConnected() ) {
+      		return getError(GHDB_SOCK_NOT_CONNECT);
+   	}
+
+   	rc = sendOrder( sock, msgBuildQuery );
+   	PD_RC_CHECK ( rc, PDERROR, "Failed to send order, rc = %d", rc ) ;
+   	rc = recvReply( sock );
+   	PD_RC_CHECK ( rc, PDERROR, "Failed to receive reply, rc = %d", rc ) ;
+   	rc = handleReply();
+   	PD_RC_CHECK ( rc, PDERROR, "Failed to receive reply, rc = %d", rc ) ;
+
+	done :
+   		return rc;
+	error :
+   		goto done ;
+}
+
+/******************************DeleteCommand**********************************************/
+int DeleteCommand::handleReply() {
+   	MsgReply * msg = (MsgReply*)_recvBuf;
+   	int returnCode = msg->returnCode;
+   	int ret = getError(returnCode);
+   	return ret;
+}
+
+int DeleteCommand::execute( ossSocket & sock, std::vector<std::string> & argVec ) {
+   	int rc = GHDB_OK;
+   	if( argVec.size() < 1 ) {
+      		return getError(GHDB_DELETE_INVALID_ARGUMENT);
+   	}
+   	_jsonString = argVec[0];
+   	if( !sock.isConnected() ) {
+      		return getError(GHDB_SOCK_NOT_CONNECT);
+   	}
+   	rc = sendOrder( sock, msgBuildDelete );
+   	PD_RC_CHECK ( rc, PDERROR, "Failed to send order, rc = %d", rc ) ;
+   	rc = recvReply( sock );
+   	PD_RC_CHECK ( rc, PDERROR, "Failed to receive reply, rc = %d", rc ) ;
+   	rc = handleReply();
+   	PD_RC_CHECK ( rc, PDERROR, "Failed to receive reply, rc = %d", rc ) ;
+
+	done :
+   		return rc;
+	error :
+   		goto done ;
 }
 
 /*******************************ConnectCommand****************************************/
@@ -181,7 +285,7 @@ int ConnectCommand::execute ( ossSocket &sock, std::vector<std::string> &argVec 
 /*********************************QuitCommand*****************************************/
 int QuitCommand::handleReply () {
 	int ret = GHDB_OK ;
-	// gQuit = 1 ;
+	gQuit = 1 ;
 	return ret ;
 }
 
@@ -190,10 +294,47 @@ int QuitCommand::execute( ossSocket &sock, std::vector<std::string> &argVec) {
 	if ( !sock.isConnected() ) {
 		return getError ( GHDB_SOCK_NOT_CONNECT ) ;
 	}
-	ret = sendOrder ( sock, 0 ) ;
-	// sock.close();
+	ret = sendOrder ( sock, OP_DISCONNECT ) ;
+	sock.close();
 	ret = handleReply () ;
 	return ret ;
+}
+
+/*********************************SnapshotCommand******************************************/
+int SnapshotCommand::handleReply() {
+   	int ret = GHDB_OK;
+   	MsgReply * msg = (MsgReply*)_recvBuf;
+   	int returnCode = msg->returnCode;
+   	ret = getError(returnCode);
+   	if(ret) {
+      		return ret;
+   	}
+   	bson::BSONObj bsonData = bson::BSONObj( &(msg->data[0]) );
+   	printf( "insert times is %d\n", bsonData.getIntField("insertTimes") );
+   	printf( "del times is %d\n", bsonData.getIntField("delTimes") );
+   	printf( "query times is %d\n", bsonData.getIntField("queryTimes") );
+   	printf( "server run time is %dm\n", bsonData.getIntField("serverRunTime") );
+
+   	return ret;
+}
+
+int SnapshotCommand::execute( ossSocket & sock, std::vector<std::string> &argVec) {
+   	int rc = GHDB_OK;
+   	if( !sock.isConnected() ) {
+      		return getError(GHDB_SOCK_NOT_CONNECT);
+   	}
+
+   	rc = sendOrder( sock, OP_SNAPSHOT );
+   	PD_RC_CHECK ( rc, PDERROR, "Failed to send order, rc = %d", rc ) ;
+   	rc = recvReply( sock );
+   	PD_RC_CHECK ( rc, PDERROR, "Failed to receive reply, rc = %d", rc ) ;
+   	rc = handleReply();
+   	PD_RC_CHECK ( rc, PDERROR, "Failed to receive reply, rc = %d", rc ) ;
+
+	done :
+   		return rc;
+	error :
+   		goto done ;
 }
 
 /**********************************HelpCommand****************************************/
