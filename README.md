@@ -1,2 +1,0 @@
-# GHDB
-Gonghao Database
